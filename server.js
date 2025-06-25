@@ -1,7 +1,8 @@
+require('dotenv').config(); // Load .env file
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config(); // Load .env file
+
 
 const userRoutes = require('./routes/userRoutes'); // Route file
 const moviesRoutes = require('./routes/moviesRoutes'); // Route file
