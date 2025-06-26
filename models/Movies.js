@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('mongoose'); // <-- Add this line
 
 const MovieSchema = new mongoose.Schema({
   id: Number,
@@ -6,6 +6,6 @@ const MovieSchema = new mongoose.Schema({
   image: String,
   genre: String,
   rating: Number
-}, { collection: 'moives' });
+}, { collection: 'movieslist' });
 
 module.exports = mongoose.model('Movies', MovieSchema);
