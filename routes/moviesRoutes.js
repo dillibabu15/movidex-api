@@ -63,4 +63,57 @@ router.post('/:id/review', auth, async (req, res) => {
   }
 });
 
+
+// Admin: Add a new movie
+router.post('/', auth, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  try {
+    const { title, genre, rating, image, description } = req.body;
+    if (!title || !genre || !rating || !image || !description) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    const movie = new Movie({ title, genre, rating, image, description });
+    await movie.save();
+    res.status(201).json({ message: 'Movie added', movie });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Admin: Edit a movie
+router.put('/:id', auth, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  try {
+    const { title, genre, rating, image, description } = req.body;
+    const movie = await Movie.findByIdAndUpdate(
+      req.params.id,
+      { title, genre, rating, image, description },
+      { new: true }
+    );
+    if (!movie) return res.status(404).json({ message: 'Movie not found' });
+    res.json({ message: 'Movie updated', movie });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Admin: Delete a movie
+router.delete('/:id', auth, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  try {
+    const movie = await Movie.findByIdAndDelete(req.params.id);
+    if (!movie) return res.status(404).json({ message: 'Movie not found' });
+    res.json({ message: 'Movie deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+
 module.exports = router;
