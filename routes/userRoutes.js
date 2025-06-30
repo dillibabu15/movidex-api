@@ -68,6 +68,26 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// GET /api/users - Get all users (admin only)
+router.get("/", auth, async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  const users = await User.find({}, "_id username role");
+  res.json(users);
+});
+
+// PUT /api/users/:id - Update user (admin only)
+router.put("/:id", auth, async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  const { username, role } = req.body;
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { username, role },
+    { new: true }
+  );
+  if (!user) return res.status(404).json({ message: "User not found" });
+  res.json({ _id: user._id, username: user.username, role: user.role });
+});
+
 // GET /api/users/:id/watchlist - Get user's watchlist
 router.get('/:id/watchlist', auth, async (req, res) => {
   try {
@@ -103,6 +123,56 @@ router.post('/:id/watchlist', auth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
+});
+
+// GET /api/users/details - Admin: Get all users with watchlist, reviews, and ratings
+router.get("/details", auth, async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  const users = await User.find({}, "_id username role watchlist")
+    .populate("watchlist", "title")
+    .lean();
+
+  // Get all movies with reviews/ratings
+  const Movie = require("../models/Movies");
+  const movies = await Movie.find({}, "title reviews ratings").lean();
+
+  // Map userId to their reviews/ratings
+  const userDetails = users.map(user => {
+    // Reviews by this user
+    const userReviews = [];
+    const userRatings = [];
+    movies.forEach(movie => {
+      // Reviews
+      (movie.reviews || []).forEach(r => {
+        if (r.user && r.user.toString() === user._id.toString()) {
+          userReviews.push({
+            movieTitle: movie.title,
+            text: r.text,
+            date: r.date
+          });
+        }
+      });
+      // Ratings
+      (movie.ratings || []).forEach(r => {
+        if (r.user && r.user.toString() === user._id.toString()) {
+          userRatings.push({
+            movieTitle: movie.title,
+            value: r.value
+          });
+        }
+      });
+    });
+    return {
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      watchlist: user.watchlist || [],
+      reviews: userReviews,
+      ratings: userRatings
+    };
+  });
+
+  res.json(userDetails);
 });
 
 module.exports = router;
