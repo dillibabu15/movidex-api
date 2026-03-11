@@ -2,26 +2,60 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+const rateLimit = require('express-rate-limit');
+const sanitize = require('mongo-sanitize');
 const User = require('../models/User');
 const auth = require('../middleware/auth'); // JWT verification middleware
 
+// Rate limiter for auth endpoints (10 attempts per 15 min)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { message: 'Too many attempts, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Password complexity check
+const isStrongPassword = (password) => {
+  if (typeof password !== 'string' || password.length < 12) return false;
+  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/.test(password);
+};
+
 // POST /api/users/register
-router.post('/register', async (req, res) => {
-  const { username, password } = req.body;
+router.post('/register', authLimiter, async (req, res) => {
+  const username = sanitize(req.body.username);
+  const password = req.body.password;
+
+  // Validate types
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ message: 'Invalid input' });
+  }
+
+  // Username validation
+  if (!username || username.trim().length < 3 || username.trim().length > 30) {
+    return res.status(400).json({ message: 'Username must be 3-30 characters' });
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    return res.status(400).json({ message: 'Username may only contain letters, numbers, and underscores' });
+  }
 
   try {
-    if (!password || password.length < 12) {
-      return res.status(400).json({ message: 'Password must be at least 12 characters' });
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        message: 'Password must be at least 12 characters with uppercase, lowercase, number, and special character (@$!%*?&#)'
+      });
     }
 
-    const existingUser = await User.findOne({ username });
+    const existingUser = await User.findOne({ username: username.trim() });
     if (existingUser) {
       return res.status(400).json({ message: 'Username already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({
-      username,
+      username: username.trim(),
       password: hashedPassword,
       role: 'user' // default role
     });
@@ -30,13 +64,20 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ message: 'User registered' });
 
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Register error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
 // POST /api/users/login
-router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+router.post('/login', authLimiter, async (req, res) => {
+  const username = sanitize(req.body.username);
+  const password = req.body.password;
+
+  // Validate types
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ message: 'Invalid input' });
+  }
 
   try {
     const user = await User.findOne({ username });
@@ -49,7 +90,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(
       { id: user._id, username: user.username, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS256' }
     );
 
     res.json({
@@ -63,29 +104,39 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Login error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
 // GET /api/users - Get all users (admin only)
 router.get("/", auth, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
-  const users = await User.find({}, "_id username role");
-  res.json(users);
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    const users = await User.find({}, "_id username role");
+    res.json(users);
+  } catch (err) {
+    console.error('Fetch users error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
 // PUT /api/users/:id - Update user (admin only)
 router.put("/:id", auth, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
-  const { username, role } = req.body;
-  const user = await User.findByIdAndUpdate(
-    req.params.id,
-    { username, role },
-    { new: true }
-  );
-  if (!user) return res.status(404).json({ message: "User not found" });
-  res.json({ _id: user._id, username: user.username, role: user.role });
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    const { username, role } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { username, role },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json({ _id: user._id, username: user.username, role: user.role });
+  } catch (err) {
+    console.error('Update user error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
 // GET /api/users/:id/watchlist - Get user's watchlist
@@ -101,7 +152,8 @@ router.get('/:id/watchlist', auth, async (req, res) => {
     res.json({ watchlist: user.watchlist });
 
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Watchlist fetch error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -113,15 +165,16 @@ router.post('/:id/watchlist', auth, async (req, res) => {
     }
 
     const { watchlist } = req.body;
-    if (!Array.isArray(watchlist)) {
-      return res.status(400).json({ message: 'Watchlist must be an array of movie IDs' });
+    if (!Array.isArray(watchlist) || !watchlist.every(id => mongoose.Types.ObjectId.isValid(id))) {
+      return res.status(400).json({ message: 'Watchlist must be an array of valid movie IDs' });
     }
 
     await User.findByIdAndUpdate(req.user.id, { watchlist });
     res.json({ message: 'Watchlist updated successfully' });
 
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Watchlist update error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

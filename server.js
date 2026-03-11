@@ -2,44 +2,62 @@ require('dotenv').config(); // Load .env file
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
 
-
-const userRoutes = require('./routes/userRoutes'); // Route file
-const moviesRoutes = require('./routes/moviesRoutes'); // Route file
-
+const userRoutes = require('./routes/userRoutes');
+const moviesRoutes = require('./routes/moviesRoutes');
 
 const app = express();
 
-// Middlewares
-app.use(cors()); // Allow cross-origin requests
-app.use(express.json()); // Parse JSON bodies
+// Security headers (X-Frame-Options, CSP, HSTS, etc.)
+app.use(helmet());
 
-// API route
-app.use('/api/users', userRoutes); // User routes
-app.use('/api/movies', moviesRoutes); // Movie routes
+// CORS - configurable via env
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
 
-// // Optional root route (prevents "Cannot GET /")
-// app.get('/', (req, res) => {
-//   res.send('MoviePlux API is working!');
-// });
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
+// Body parser with size limit (prevents DoS via large payloads)
+app.use(express.json({ limit: '10kb' }));
 
-// // Optional root route (prevents "Cannot GET /")
-// app.get('/login', (req, res) => {
-//   res.send('Login API is working!');
-// });
+// Root route (before API routes)
+app.get('/', (req, res) => {
+  res.send('Moviedux API is running!');
+});
 
-// Connect to MongoDB and start server
+// API routes
+app.use('/api/users', userRoutes);
+app.use('/api/movies', moviesRoutes);
+
+// 404 fallback
+app.use((req, res) => {
+  res.status(404).json({ message: `Route ${req.originalUrl} not found` });
+});
+
+// Connect to MongoDB then start server
+const PORT = process.env.PORT || 5000;
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
-    console.log("✅ MongoDB connected");
-    
-    app.listen(process.env.PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${process.env.PORT}`);
+    console.log('✅ MongoDB connected');
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
   })
   .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
+    console.error('❌ MongoDB connection error:', err.message);
+    process.exit(1);
   });
 
   
